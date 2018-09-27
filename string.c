@@ -78,6 +78,18 @@ strncpy(char *s, const char *t, int n)
   return os;
 }
 
+ int 
+ strnlen(const char *s, uint size) 
+ { 
+   int n; 
+  
+   for (n = 0; size > 0 && *s != '\0'; s++, size--) 
+     n++; 
+   return n; 
+ } 
+ 
+
+
 // Like strncpy but guaranteed to NUL-terminate.
 char*
 safestrcpy(char *s, const char *t, int n)

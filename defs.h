@@ -89,6 +89,7 @@ void            end_op();
 // mp.c
 extern int      ismp;
 void            mpinit(void);
+void            mpinit_acpi(void *);
 
 // picirq.c
 void            picenable(int);
@@ -161,7 +162,8 @@ void            uartputc(int);
 
 // vm.c
 void            seginit(void);
-void            kvmalloc(void);
+void            kvmalloc(void *, uint, uint);
+pde_t*          setupkvm1(void *, uint, uint);
 pde_t*          setupkvm(void);
 char*           uva2ka(pde_t*, char*);
 int             allocuvm(pde_t*, uint, uint);

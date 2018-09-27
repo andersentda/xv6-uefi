@@ -10,23 +10,28 @@ static void startothers(void);
 static void mpmain(void)  __attribute__((noreturn));
 extern pde_t *kpgdir;
 extern char end[]; // first address after kernel loaded from ELF file
+typedef unsigned int   size_t;
 
 // Bootstrap processor starts running C code here.
 // Allocate a real stack and switch to it, first
 // doing some setup required for memory allocator to work.
-int
-main(void)
+void
+kernel_init(uint memory_map_phys, size_t map_size, size_t desc_size,
+	uint Rsdp_phys)
 {
+  //void * memory_map = P2V(memory_map_phys);
+  void * Rsdp = P2V(Rsdp_phys);
+  void * mem_map = P2V(memory_map_phys);
   kinit1(end, P2V(4*1024*1024)); // phys page allocator
-  kvmalloc();      // kernel page table
-  mpinit();        // detect other processors
+  kvmalloc(mem_map, map_size, desc_size);      // kernel page table
+  mpinit_acpi(Rsdp);        // detect other processors
   lapicinit();     // interrupt controller
   seginit();       // segment descriptors
-  cprintf("\ncpu%d: starting xv6\n\n", cpunum());
   picinit();       // another interrupt controller
   ioapicinit();    // another interrupt controller
   consoleinit();   // console hardware
   uartinit();      // serial port
+  cprintf("\ncpu%d: starting xv6\n\n", cpunum());
   pinit();         // process table
   tvinit();        // trap vectors
   binit();         // buffer cache

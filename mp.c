@@ -10,6 +10,7 @@
 #include "x86.h"
 #include "mmu.h"
 #include "proc.h"
+#include "acpi.h"
 
 struct cpu cpus[NCPU];
 int ismp;
@@ -88,6 +89,62 @@ mpconfig(struct mp **pmp)
   *pmp = mp;
   return conf;
 }
+
+void
+mpinit_acpi(void * r)
+{
+  RSDP_t * rsdp = (RSDP_t*)r;
+  RSDT_t * rsdt = P2V(rsdp->RsdtAddress);
+
+    if(!AcpiChecksum(rsdt, rsdt->Length))
+      return;
+   
+   // Iterate through the tables to find the MADT
+   MADT_t* madt;
+   int tableCount = (rsdt->Length-sizeof(RSDT_t))/4;
+   int i;
+   for(i = 0; i < tableCount; i++)
+   {
+      madt = (MADT_t*)P2V(*(((uint32*)(rsdt+1))+i));
+      if(memcmp(madt, "APIC", 4) == 0)
+         break;
+   }
+   if(i == tableCount) // If we didn't find the MADT, something screwed up
+      return;
+   if(!AcpiChecksum(madt, madt->Length)) // Checksum the MADT
+      return;
+   
+   // Get the number of processors and IO APICs
+   ncpu = 0;
+   lapic = (uint*)madt->LapicAddress;
+   for(MADTSubtable_t* sub = (MADTSubtable_t*)(madt+1); (void*)sub < ((void*)madt)+madt->Length; sub = (MADTSubtable_t*)(((void*)sub)+sub->Length))
+   {
+      if(sub->Type == MADT_LAPIC)
+      {
+        AcpiLapic_t* lapic_sub = ((AcpiLapic_t*)sub);
+        if (!(lapic_sub->Flags & 0x1)) break;
+        if(ncpu < NCPU) {
+            cpus[ncpu].apicid = lapic_sub->LapicId;  // apicid may differ from ncpu
+            ncpu++;
+        }
+      }
+      else if (sub->Type == MADT_IOAPIC)
+      {
+          ioapicid = ((AcpiIoApic_t*)sub)->IoApicId;
+      }
+   }
+   if(!ncpu){
+    // Didn't like what we found; fall back to no MP.
+    ncpu = 1;
+    lapic = 0;
+    ioapicid = 0;
+    ismp = 0;
+    return;
+  } else {
+    ismp = 1;
+  }
+
+ }
 
 void
 mpinit(void)

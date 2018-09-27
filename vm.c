@@ -10,6 +10,21 @@
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
 
+uint phystop = PHYSTOP;
+
+typedef struct {
+     uint                          Type;           // Field size is 32 bits followed by 32 bit pad
+     uint                          Pad;
+     uint            PhysicalStart;  // Field size is 64 bits
+     uint                          Pad1;
+     char *             VirtualStart;   // Field size is 64 bits
+     uint               NumberOfPagesUpper;
+     uint                          NumberOfPages;  // Field size is 64 bits
+     uint                          AttributeUpper;      // Field size is 64 bits
+     uint                          Attribute;      // Field size is 64 bits
+ } EFI_MEMORY_DESCRIPTOR;
+
+
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
 void
@@ -119,13 +134,14 @@ static struct kmap {
 } kmap[] = {
  { (void*)KERNBASE, 0,             EXTMEM,    PTE_W}, // I/O space
  { (void*)KERNLINK, V2P(KERNLINK), V2P(data), 0},     // kern text+rodata
- { (void*)data,     V2P(data),     PHYSTOP,   PTE_W}, // kern data+memory
+ { (void*)data,     V2P(data),     0x400000,   PTE_W}, // kern data+memory
+ { (void*)0x80400000,   0x400000,     0x400000,   PTE_W}, // place for the memory map
+ { (void*)0x80400000,   0x400000,     PHYSTOP,   PTE_W}, // rest of physical memory
  { (void*)DEVSPACE, DEVSPACE,      0,         PTE_W}, // more devices
 };
 
-// Set up kernel part of a page table.
 pde_t*
-setupkvm(void)
+setupkvm1(void * mem_map, uint map_size, uint desc_size)
 {
   pde_t *pgdir;
   struct kmap *k;
@@ -133,11 +149,64 @@ setupkvm(void)
   if((pgdir = (pde_t*)kalloc()) == 0)
     return 0;
   memset(pgdir, 0, PGSIZE);
-  if (P2V(PHYSTOP) > (void*)DEVSPACE)
+   for(k = kmap; k < &kmap[3]; k++)
+       if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
+                (uint)k->phys_start, k->perm) < 0)
+         return 0;
+ 
+  if (map_size > 0)
+  {
+      void * mem_map_pg = (void*)PGROUNDDOWN((uint)mem_map);
+      uint mem_map_size_pgs = PGROUNDUP(mem_map + map_size - mem_map_pg);
+      if (mappages(pgdir,  mem_map_pg, mem_map_size_pgs,  V2P(mem_map_pg), 0) < 0)
+          return 0;
+      lcr3(V2P(pgdir));   // switch to the partial page table
+
+
+      uint nphys_pages = 0;
+      char * startOfMemoryMap = (char *)mem_map;
+      char * endOfMemoryMap = startOfMemoryMap + map_size;
+
+      char * offset = startOfMemoryMap;
+
+      while (offset < endOfMemoryMap)
+      {
+          EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)offset;
+          nphys_pages += desc->NumberOfPages;
+          offset += desc_size;
+      }
+      phystop = nphys_pages * PGSIZE;
+      kmap[3].phys_end = V2P(mem_map_pg);
+      kmap[4].virt = mem_map_pg + mem_map_size_pgs;
+      kmap[4].phys_start = V2P(mem_map_pg) + mem_map_size_pgs;
+      kmap[4].phys_end = phystop;
+  }
+  if (P2V(phystop) > (void*)DEVSPACE)
+       panic("PHYSTOP too high");
+  for(k = &kmap[3]; k < &kmap[NELEM(kmap)]; k++)
+    if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
+                (uint)k->phys_start, k->perm) < 0)
+      return 0;
+  return pgdir;
+}
+
+
+// Set up kernel part of a page table.
+pde_t*
+setupkvm()
+{
+  pde_t *pgdir;
+  struct kmap *k;
+
+  if((pgdir = (pde_t*)kalloc()) == 0)
+    return 0;
+  memset(pgdir, 0, PGSIZE);
+
+  if (P2V(phystop) > (void*)DEVSPACE)
     panic("PHYSTOP too high");
   for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
-                (uint)k->phys_start, k->perm) < 0)
+             (uint)k->phys_start, k->perm) < 0)
       return 0;
   return pgdir;
 }
@@ -145,9 +214,9 @@ setupkvm(void)
 // Allocate one page table for the machine for the kernel address
 // space for scheduler processes.
 void
-kvmalloc(void)
+kvmalloc(void * mem_map, uint map_size, uint desc_size)
 {
-  kpgdir = setupkvm();
+  kpgdir = setupkvm1(mem_map, map_size, desc_size);
   switchkvm();
 }
 
