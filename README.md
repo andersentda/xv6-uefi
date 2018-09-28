@@ -10,7 +10,7 @@ A 32-bit version of OVMF is included, but you can build your own from source usi
 You need to have mkgpt installed. Follow these instructions:
 
 ~~~
-sudo apt-get install qemu binutils-mingw-w64 gcc-mingw-w64 xorriso mtools
+sudo apt-get install qemu binutils-mingw-w64 gcc-mingw-w64 xorriso mtools gnu-efi
 wget http://www.tysos.org/files/efi/mkgpt-latest.tar.bz2
 tar jxf mkgpt-latest.tar.bz2
 cd mkgpt && ./configure && make && sudo make install && cd ..
